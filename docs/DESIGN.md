@@ -1,150 +1,348 @@
 # Design Document — openclaw-prompt-defender
 
 **Project:** openclaw-prompt-defender  
-**Date:** 2026-02-11  
-**Status:** Architecture defined, ready for Phase 1 implementation  
+**Date:** 2026-02-11 (Updated with revised strategy)  
+**Status:** Architecture revised — Input filtering ready, output filtering pending upstream contribution  
 **Repository:** https://github.com/crayon-doing-petri/openclaw-prompt-defender (private)
 
 ---
 
 ## Executive Summary
 
-A unified security plugin for OpenClaw that provides **bidirectional content filtering** — scanning both user input and tool output before they reach the LLM model.
+A security plugin for OpenClaw focused on **prompt injection detection and jailbreak prevention**. Due to a critical timing gap in OpenClaw's hook system, we are implementing a **phased approach**:
 
-**Core innovation:** Two-layer architecture where a thin TypeScript plugin (in OpenClaw sandbox) delegates all security work to a Python/FastAPI service (with full host access) via HTTP.
+1. **Phase 1:** Input filtering via `message:received` (works immediately)
+2. **Phase 2:** Contribute `before_tool_result` hook upstream (for proper output filtering)
+3. **Phase 3:** Output filtering via new hook (once upstream PR merges)
 
----
-
-## Key Design Decisions
-
-### 1. Plugin Gateway Pattern (Selected)
-
-| Aspect | Rationale |
-|--------|-----------|
-| **Thin plugin + HTTP service** | Plugin stays in sandbox; service does heavy lifting |
-| **Language freedom** | Can leverage existing Python tools (prompt-guard, detect-injection) |
-| **1Password access** | Service layer can spawn `op` CLI; plugin cannot |
-| **Future extensibility** | Add new endpoints without plugin redeploy |
-
-**Alternatives considered:**
-- Pure TypeScript in plugin: Limited by sandbox, can't use 1Password CLI
-- Separate plugin per tool: Too many moving pieces
-- Generic mega-plugin: Becomes kitchen sink, hard to debug
-
-### 2. Bidirectional Filtering
-
-**Two hooks, shared scan engine:**
-
-```
-User Input  ──▶  message:received  ──▶  /scan (profile=input/strict)
-                                                     │
-                                                     ▼
-                                             ┌───────────────┐
-                                             │ Unified Scan  │
-                                             │ Engine        │
-                                             └───────┬───────┘
-                                                     │
-                                                     ▼
-Tool Output ──▶  tool_result:persist ──▶  /scan (profile=output/moderate)
-```
-
-**Input profile (strict):**
-- Prompt injection detection
-- Jailbreak prevention
-- SHIELD categories
-- Owner bypass
-
-**Output profile (moderate):**
-- PII scrubbing
-- Content safety
-- Size limiting
-- Malicious URL detection
-
-### 3. Unified Service Endpoint
-
-Single `/scan` endpoint with `type` parameter:
-
-```bash
-POST /scan
-{
-  "type": "input" | "output",
-  "content": "...",
-  "user_id": "...",
-  "tool_name": "..."  # for output type
-}
-```
-
-Response:
-```json
-{
-  "action": "allow" | "block" | "sanitize",
-  "sanitized": "modified content",
-  "severity": "none" | "low" | "medium" | "high" | "critical",
-  "reasons": ["..."]
-}
-```
-
-### 4. Fail-Open Strategy
-
-| Scenario | Behavior |
-|----------|----------|
-| Service unreachable | Allow/sanitize minimally, log warning |
-| Timeout exceeded | Allow/sanitize minimally, log warning |
-| Service error | Allow/sanitize minimally, log error |
-| Scan success | Follow scan decision (block/sanitize/allow) |
-
-**Rationale:** Prevent security filter outage from blocking all agent functionality.
+**Short-term:** Input protection only  
+**Long-term:** Full bidirectional filtering via upstream contribution
 
 ---
 
-## Hook Verification Results
+## Critical Discovery: Hook Timing Gap
 
-✅ **All required hooks verified in current fork**
+### The Problem
 
-| Hook | Available In | Can Modify? | Can Cancel? |
-|------|--------------|-------------|-------------|
-| `message:received` | PR #12637 (merged) | ✅ Yes | ✅ Yes |
-| `tool_result:persist` | Core OpenClaw | ✅ Yes | ❌ No* |
+Analysis of OpenClaw source code confirms that **`tool_result_persist` fires AFTER the LLM has already processed the tool result** for the current turn.
 
-*Note: `tool_result_persist` can return empty/sanitized but can't fully cancel. Model will see empty content rather than nothing.
+```typescript
+// From src/agents/session-tool-result-guard.ts (line ~148):
+// "Apply hard size cap before persistence to prevent oversized tool results
+// from consuming the entire context window on **subsequent** LLM calls"
+```
 
-**Important:** No additional fork changes needed. PR #12637 already merged into `feat/message-received`. Tool output filtering works via `tool_result:persist` (fires when tool results persisted to session transcript — model reads from transcript).
+The keyword "**subsequent**" confirms that this hook only affects future turns that read from the session transcript. The LLM sees raw content immediately.
+
+### Timing Diagram (Current)
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                          CURRENT TURN                                   │
+│                                                                         │
+│  Tool executes ──▶ Returns raw result with secrets                     │
+│       │                                                                 │
+│       ▼                                                                 │
+│  LLM receives raw result IMMEDIATELY                                    │
+│       │                  ← NO hook fired yet                            │
+│       │                                                                 │
+│       ▼                                                                 │
+│  LLM processes and potentially outputs secrets                         │
+│       │                                                                 │
+│       ▼                                                                 │
+│  sessionManager.appendMessage() called                                 │
+│       │                                                                 │
+│       ▼                                                                 │
+│  tool_result_persist hook fires (too late)                             │
+│       │                                                                 │
+│       ▼                                                                 │
+│  Sanitized message saved to transcript                                 │
+│       │                                                                 │
+│       ▼                                                                 │
+│  Future turns see redacted version                                     │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### Impact
+
+Our original plan to use `tool_result_persist` for real-time tool output filtering **will not work as intended**. The LLM will still see raw secrets/PII in the current turn.
 
 ---
 
-## Implementation Phases
+## Revised Strategy
 
-### Phase 1: Foundation (Week 1)
+### The Solution: Two-Phase Implementation
+
+#### Phase 1: Input Filtering (Immediate)
+
+✅ **Focus: `message:received` hook** — Scan user messages for prompt injection and jailbreak attempts.
+
+**This works perfectly** because the hook fires before any processing:
+
+```
+User sends message ──▶ message:received hook ──▶ Plugin scans ──▶ Allow/Block
+                              │
+                              ▼
+                    Can CANCEL before LLM sees it
+```
+
+#### Phase 2: Upstream Contribution (In Progress)
+
+🔄 **Contribute `before_tool_result` hook to OpenClaw** — A new hook that fires immediately after tool execution but **before** the result reaches the LLM.
+
+**Design:**
+- Hook wraps at the SDK level (Option B)
+- All tools (built-in + custom) pass through it
+- Allows modification, sanitization, or blocking of tool results
+
+**Implementation:**
+```typescript
+api.on("before_tool_result", async (event) => {
+  const result = await scan({ 
+    type: "output", 
+    content: event.content 
+  });
+  
+  if (result.action === "sanitize") {
+    return { content: result.sanitized };
+  }
+  
+  if (result.action === "block") {
+    return { 
+      block: true, 
+      blockReason: result.reason 
+    };
+  }
+});
+```
+
+#### Phase 3: Output Filtering (After Upstream Merge)
+
+✅ **Full bidirectional filtering** — Once the `before_tool_result` PR merges:
+- Input: `message:received` (injection, jailbreak)
+- Output: `before_tool_result` (PII, content safety)
+
+#### Phase 4: L5 Gate Tool (Fallback)
+
+🛡️ **Interim protection** — If upstream contribution takes longer than expected, implement an L5-style security gate tool (like Knostic Shield) as a fallback:
+
+```typescript
+api.registerTool({
+  name: "security_scan",
+  execute: async (toolCallId, params) => {
+    // Pre-scan file content before agent reads it
+    const result = await scanFile(params.file_path);
+    return {
+      content: result.sanitized,
+      status: result.status  // ALLOWED or DENIED
+    };
+  }
+});
+```
+
+---
+
+## Revised Architecture
+
+### Phase 1: Input-Only (Current)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       Phase 1: Input Filtering Only                      │
+│                                                                          │
+│  User Input                                                              │
+│       │                                                                  │
+│       ▼                                                                  │
+│  ┌─────────────────┐                                                     │
+│  │ message:received│──▶ Security Service ──▶ /scan (input/strict)       │
+│  │     hook        │                                                     │
+│  └─────────────────┘                                                     │
+│       │                                                                  │
+│       ▼                                                                  │
+│  ┌─────────────────┐                                                     │
+│  │  Decision       │                                                     │
+│  │  ALLOW / BLOCK  │                                                     │
+│  └─────────────────┘                                                     │
+│       │                                                                  │
+│       ▼                                                                  │
+│  LLM Model (sees only safe content)                                      │
+│                                                                          │
+│  Tool Output ──▶ LLM (raw, unfiltered) ──▶ User                          │
+│       ⚠️ LIMITATION: No filtering yet                                    │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Phase 3: Full Bidirectional (After Upstream)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    Phase 3: Full Bidirectional Filtering                 │
+│                                                                          │
+│  User Input                                                              │
+│       │                                                                  │
+│       ▼                                                                  │
+│  message:received ──▶ /scan (input) ──▶ ALLOW/BLOCK ──▶ LLM            │
+│                                                                          │
+│  Tool Output                                                             │
+│       │                                                                  │
+│       ▼                                                                  │
+│  before_tool_result ──▶ /scan (output) ──▶ SANITIZE ──▶ LLM            │
+│       │                                                                  │
+│       ▼                                                                  │
+│  LLM Model (sees safe content from both directions)                      │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Upstream Contribution Plan
+
+### What We're Contributing
+
+A new **`before_tool_result` hook** for OpenClaw that fires between tool execution and LLM processing.
+
+### Implementation Details
+
+**Location:** SDK-level tool wrapper (Option B)  
+**Approach:** Wrap `tool.execute()` to intercept all tool results
+
+```typescript
+// Pseudo-code for implementation
+const originalExecute = tool.execute;
+tool.execute = async (toolCallId, params, signal, onUpdate) => {
+  // Run the tool
+  const result = await originalExecute(toolCallId, params, signal, onUpdate);
+  
+  // Run hook BEFORE returning to agent/LLM
+  const hookRunner = getGlobalHookRunner();
+  if (hookRunner?.hasHooks("before_tool_result")) {
+    const hookResult = await hookRunner.runBeforeToolResult({
+      toolName: tool.name,
+      toolCallId,
+      params,
+      content: result,
+      isError: result.error != null,
+    }, ctx);
+    
+    if (hookResult?.block) {
+      return { error: hookResult.blockReason };
+    }
+    
+    return hookResult?.content ?? result;
+  }
+  
+  return result;
+};
+```
+
+### Benefits to OpenClaw Community
+
+1. **Security plugins** can finally do real-time output filtering
+2. **PII protection** for healthcare, finance, legal use cases
+3. **Data loss prevention** without performance overhead of gate tools
+4. **Cleaner than L5 pattern** — transparent to agents, no extra tool calls
+
+### Timeline Estimate
+
+| Phase | Duration | Status |
+|-------|----------|--------|
+| Fork & implement | 1-2 weeks | 🔄 Ready to start |
+| Test with prompt-defender | 1 week | Pending implementation |
+| Write tests & docs | 1 week | Pending |
+| Submit PR | — | Pending |
+| Review & merge | 1-4 weeks | Dependent on maintainers |
+| **Total** | **4-8 weeks** | Variable |
+
+---
+
+## Revised Implementation Phases
+
+### Phase 1: Input Filtering Foundation (Weeks 1-2)
+
+**Goal:** Working input protection via `message:received`
+
 - [ ] Set up `plugin/` and `service/` directories
-- [ ] Initialize npm/pip projects with configs
-- [ ] Create OpenClaw plugin manifest (`openclaw.plugin.json`)
-- [ ] Implement `/scan` endpoint with type switching
-- [ ] Port `prompt-guard` pattern matcher to Python
-- [ ] Port `detect-injection` vector scanner to Python
+- [ ] Create OpenClaw plugin manifest
+- [ ] Implement `/scan` endpoint with `type=input`
+- [ ] Port `prompt-guard` pattern matcher
+- [ ] Implement `message:received` handler
 - [ ] Owner bypass system
+- [ ] End-to-end testing
 
-### Phase 2: Integration (Week 2)
-- [ ] TypeScript HTTP client for service
-- [ ] `message:received` handler implementation
-- [ ] `tool_result:persist` handler implementation
-- [ ] Input profile (strict) — injection, jailbreak
-- [ ] Output profile (moderate) — PII, content safety
-- [ ] End-to-end test with OpenClaw
+**Deliverable:** v0.1.0-alpha with input filtering
 
-### Phase 3: Features (Week 3)
-- [ ] Hash cache for 90% token reduction
-- [ ] 1Password CLI integration in service
-- [ ] Service health check endpoint
-- [ ] Audit logging (openclaw-cmdlog)
+### Phase 2: Upstream Contribution (Weeks 3-6)
+
+**Goal:** Implement and contribute `before_tool_result` hook
+
+- [ ] Fork OpenClaw repository
+- [ ] Add `before_tool_result` hook type definition
+- [ ] Implement hook runner
+- [ ] Add invocation site (SDK tool wrapper)
+- [ ] Write unit tests
+- [ ] Write integration tests
+- [ ] Submit PR with documentation
+- [ ] Engage with maintainers for feedback
+
+**Deliverable:** OpenClaw PR with new hook
+
+### Phase 3: Output Filtering (Weeks 7-8)
+
+**Goal:** Full bidirectional filtering (after upstream PR merges)
+
+- [ ] Add `before_tool_result` handler to plugin
+- [ ] Implement `/scan` endpoint with `type=output`
+- [ ] Port PII detection patterns
+- [ ] Content safety scanning
+- [ ] End-to-end testing with both hooks
+
+**Deliverable:** v0.2.0 with bidirectional filtering
+
+### Phase 4: Polish & Features (Weeks 9-10)
+
+**Goal:** Production-ready release
+
+- [ ] Hash cache for performance
+- [ ] 1Password CLI integration
 - [ ] Multi-language support (10 languages)
-- [ ] Load/performance testing
-
-### Phase 4: Polish (Week 4)
 - [ ] Comprehensive test suite
-- [ ] Documentation: setup guide, API docs
-- [ ] Deployment scripts
-- [ ] GitHub Actions CI/CD
-- [ ] v0.1.0 release
+- [ ] Documentation
+- [ ] L5 gate tool (optional fallback)
+
+**Deliverable:** v1.0.0 stable release
+
+### Phase 5: L5 Gate Tool (Fallback, if needed)
+
+**Goal:** Interim output protection while waiting for upstream
+
+- [ ] Implement `security_scan` tool
+- [ ] Pre-scan file reads and exec commands
+- [ ] Return sanitized content to agent
+- [ ] Prompt injection to ensure agent uses it
+
+**Deliverable:** L5-style gate (optional, if upstream delayed)
+
+---
+
+## Hook Verification Status
+
+### ✅ Available and Working
+
+| Hook | Timing | Can Modify? | Use For |
+|------|--------|-------------|---------|
+| `message:received` | Before LLM processes | ✅ Yes (content, cancel) | **Input filtering** |
+
+### ⚠️ Available But Timing Issue
+
+| Hook | Timing | Can Modify? | Use For |
+|------|--------|-------------|---------|
+| `tool_result_persist` | After persistence (LLM already saw it) | ✅ Yes | History sanitization only |
+
+### 🔄 Planned (Upstream Contribution)
+
+| Hook | Timing | Can Modify? | Use For |
+|------|--------|-------------|---------|
+| `before_tool_result` | After execution, before LLM | ✅ Yes | **Output filtering** (once implemented) |
 
 ---
 
@@ -153,11 +351,9 @@ Response:
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | **Plugin** | TypeScript / Node.js | OpenClaw integration, hooks |
-| **Service** | Python / FastAPI | Security scanning, host access |
-| **Pattern Engine** | Ported from prompt-guard | Fast regex matching |
-| **Vector Engine** | Ported from detect-injection | HF-based semantic detection |
-| **Secrets** | 1Password CLI | API keys, tokens |
-| **Config** | JSON Schema | Plugin configuration |
+| **Service** | Python / FastAPI | Security scanning, pattern matching |
+| **Pattern Engine** | Ported from prompt-guard | Fast regex injection detection |
+| **Vector Engine** | Ported from detect-injection | HF-based semantic detection (optional) |
 
 ---
 
@@ -165,21 +361,41 @@ Response:
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Service latency | Slow agent responses | Async scanning, timeout handling, caching |
-| Service downtime | No security filtering | Fail-open strategy, no blocking of messages |
-| Pattern updates | Missed attacks | Separate pattern update mechanism |
-| False positives | User frustration | Owner bypass, adjustable thresholds |
+| Upstream PR rejected | No output filtering | Implement L5 gate tool as fallback |
+| Upstream PR delayed | Output filtering delayed | L5 gate tool for interim protection |
+| Service latency | Slow responses | Async scanning, caching, fail-open |
+| Pattern false positives | User frustration | Owner bypass, adjustable thresholds |
 
 ---
 
 ## Success Criteria
 
-- [ ] User input filtering works (injection detection)
-- [ ] Tool output filtering works (PII scrubbing)
-- [ ] Owner bypass functional (trusted users exempt)
-- [ ] Service fails gracefully (fail-open)
+### Phase 1 (Input Filtering)
+- [ ] Prompt injection detection works
+- [ ] Jailbreak prevention works
+- [ ] Owner bypass functional
 - [ ] Sub-100ms scan latency
+
+### Phase 3 (Full Bidirectional)
+- [ ] Input filtering (injection, jailbreak)
+- [ ] Output filtering (PII, content safety)
+- [ ] Both via appropriate hooks
 - [ ] 90% token reduction via hash cache
+
+---
+
+## Comparison: Our Approach vs. Knostic Shield
+
+| Aspect | Knostic Shield | Our Prompt Defender |
+|--------|----------------|---------------------|
+| **Injection Detection** | ❌ No | ✅ Primary focus |
+| **Owner Bypass** | ❌ No | ✅ Yes |
+| **Secrets/PII** | ✅ Yes | ✅ Planned (Phase 3) |
+| **Architecture** | Pure plugin | Plugin + Service |
+| **Output Filtering** | L2 (history only) | Pending upstream hook |
+| **Multi-language** | ❌ English only | ✅ 10 languages planned |
+
+**Positioning:** Complementary tools. Use Knostic for data protection, ours for injection prevention.
 
 ---
 
@@ -187,14 +403,21 @@ Response:
 
 | Milestone | Status |
 |-----------|--------|
-| Architecture defined | ✅ Complete |
-| Hook verification | ✅ Complete |
-| Project structure | ✅ Ready |
-| Phase 1 implementation | 🔄 Ready to start |
-| GitHub repo | ✅ Private, URL documented |
+| Architecture revised | ✅ Complete |
+| Critical timing gap identified | ✅ Documented |
+| Upstream contribution planned | ✅ Ready to start |
+| Phase 1 (input filtering) | 🔄 Ready to implement |
+| GitHub repo | ✅ Private |
 
 ---
 
-*Document generated: 2026-02-11*  
+## Next Immediate Action
+
+**Start Phase 1:** Begin implementing input filtering via `message:received` hook while preparing upstream contribution for `before_tool_result`.
+
+---
+
+*Document updated: 2026-02-11*  
 *OpenClaw Version: 2026.2.9*  
-*OpenClaw Branch: feat/message-received (PR #12637 merged)*
+*OpenClaw Branch: feat/message-received (PR #12637 merged)*  
+*Upstream Contribution: before_tool_result hook (planned)*

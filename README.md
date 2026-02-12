@@ -2,37 +2,51 @@
 
 Built with: Kimi K2.5 (via Ollama Cloud) • OpenClaw v2026.2.4
 
-Unified prompt injection detection plugin for OpenClaw — combining the best of `prompt-guard` and `detect-injection` using the **Plugin Gateway Pattern**.
+**Prompt injection detection and jailbreak prevention** for OpenClaw — combining the best of `prompt-guard` and `detect-injection` using the **Plugin Gateway Pattern**.
 
-**Key capability:** Bidirectional filtering — both user input AND tool output are scanned before reaching the model.
+**Current Status:** ✅ Input filtering ready (via `message:received` hook) — Output filtering pending upstream OpenClaw contribution.
 
-See [docs/DESIGN.md](docs/DESIGN.md) for full architecture, design decisions, and implementation plan.
+See [docs/DESIGN.md](docs/DESIGN.md) for full architecture, design decisions, and implementation strategy.
+
+---
 
 ## Overview
 
-This project implements a two-layer security architecture: a thin TypeScript plugin that runs inside OpenClaw's sandbox, and a Python/FastAPI service that runs on the host with full system access. The plugin handles routing and aggregation while the service performs all heavy lifting (pattern matching, vector scanning, 1Password integration).
+This project implements a security filter for OpenClaw that scans **user input** for prompt injection and jailbreak attempts before they reach the LLM model.
+
+**Short-term:** Input protection only (works immediately)  
+**Long-term:** Full bidirectional filtering via upstream OpenClaw contribution (see [docs/DESIGN.md](docs/DESIGN.md))
 
 | Source | Strength | Ported |
 |--------|----------|--------|
 | **prompt-guard** | Fast pattern matching, 70% token reduction, SHIELD categories, owner bypass | ✅ |
 | **detect-injection** | Dual-layer scanning, HF-based vector detection, safety categories | ✅ |
 
+---
+
 ## Architecture
 
 Two-layer security filtering via **Plugin Gateway Pattern**:
+
 - **Plugin** (TypeScript, sandboxed) — hooks into OpenClaw, delegates to service via HTTP
 - **Service** (Python/FastAPI, host) — runs prompt-guard, detect-injection, 1Password CLI
 
-Both user input (`message:received` hook) and tool output (`tool_result:persist` hook) flow through unified `/scan` endpoint with profile-based filtering before reaching the model.
+**Current:** User input flows through `message:received` hook → `/scan` endpoint → Security Service → Block/Allow  
+**Future:** Tool output filtering via `before_tool_result` hook (upstream contribution in progress)
 
-See [docs/DESIGN.md](docs/DESIGN.md) for full architecture diagram, data flow, and design decisions.
+See [docs/DESIGN.md](docs/DESIGN.md) for:
+- Full architecture diagram
+- The hook timing gap that requires upstream contribution
+- Our plan to contribute `before_tool_result` hook to OpenClaw
+
+---
 
 ## Project Structure
 
 ```
 openclaw-prompt-defender/
 ├── docs/
-│   └── DESIGN.md           # Architecture & design decisions
+│   └── DESIGN.md           # Architecture, design decisions, upstream plan
 ├── plugin/                 # TypeScript plugin (runs in OpenClaw sandbox)
 │   ├── src/
 │   ├── openclaw.plugin.json
@@ -44,6 +58,8 @@ openclaw-prompt-defender/
 │   └── example.openclaw.json
 └── README.md
 ```
+
+---
 
 ## Quick Start
 
@@ -67,6 +83,8 @@ npm install && npm run build
 openclaw gateway restart
 ```
 
+---
+
 ## OpenClaw Configuration
 
 ```json
@@ -81,7 +99,7 @@ openclaw gateway restart
           "fail_open": true,
           "owner_ids": ["1461460866850357345"],
           "scan_input": true,
-          "scan_output": true
+          "scan_output": false
         }
       }
     }
@@ -89,20 +107,21 @@ openclaw gateway restart
 }
 ```
 
+**Note:** `scan_output` is currently disabled (`false`) because the `tool_result_persist` hook fires **after** the LLM has already seen the content. Output filtering will be enabled after we contribute the `before_tool_result` hook upstream.
+
+---
+
 ## Plugin Manifest (`openclaw.plugin.json`)
 
 ```json
 {
   "name": "openclaw-prompt-defender",
   "version": "0.1.0",
-  "description": "Unified prompt injection and content safety filtering",
+  "description": "Prompt injection detection and jailbreak prevention for OpenClaw",
   "entry": "dist/index.js",
   "hooks": {
     "message:received": {
-      "description": "Scan user messages for prompt injection and jailbreak"
-    },
-    "tool_result:persist": {
-      "description": "Sanitize tool output before model context"
+      "description": "Scan user messages for prompt injection and jailbreak attempts"
     }
   },
   "configSchema": {
@@ -129,12 +148,12 @@ openclaw gateway restart
       "scan_input": {
         "type": "boolean",
         "default": true,
-        "description": "Enable message_received scanning"
+        "description": "Enable message_received scanning (injection/jailbreak detection)"
       },
       "scan_output": {
         "type": "boolean",
-        "default": true,
-        "description": "Enable tool_result_persist scanning"
+        "default": false,
+        "description": "Enable output scanning (pending upstream hook contribution)"
       }
     },
     "required": ["service_url"]
@@ -142,18 +161,22 @@ openclaw gateway restart
 }
 ```
 
+---
+
 ## Filter Profiles
 
-| Profile | Type | Checks | Action |
-|---------|------|--------|--------|
-| **Input (strict)** | `input` | Injection, jailbreak, obfuscation, SHIELD | Block or allow |
-| **Output (moderate)** | `output` | PII scrub, content safety, size limit | Sanitize or allow |
+| Profile | Type | Checks | Action | Status |
+|---------|------|--------|--------|--------|
+| **Input (strict)** | `input` | Injection, jailbreak, obfuscation, SHIELD categories | Block or allow | ✅ **Ready** |
+| **Output (moderate)** | `output` | PII scrub, content safety, size limit | Sanitize or allow | ⏳ **Pending upstream** |
 
-Both profiles use the same unified `/scan` endpoint — the service applies the appropriate profile based on `type` parameter.
+---
 
 ## Error Handling — Fail Open
 
-By default, the plugin uses **fail-open** strategy: if the security service is unreachable, times out, or errors, the plugin allows/sanitizes minimally and logs a warning. This prevents the security filter outage from blocking all agent functionality.
+By default, the plugin uses **fail-open** strategy: if the security service is unreachable, times out, or errors, the plugin allows and logs a warning. This prevents the security filter outage from blocking all agent functionality.
+
+---
 
 ## Source Projects
 
@@ -164,21 +187,65 @@ By default, the plugin uses **fail-open** strategy: if the security service is u
 | original prompt-guard | `seojoonkim/prompt-guard` | MIT | Upstream |
 | original detect-injection | `protectai/detect-injection` | Apache 2.0 | Upstream |
 
+---
+
 ## Documentation
 
 | Document | Purpose |
 |----------|---------|
-| [docs/DESIGN.md](docs/DESIGN.md) | Architecture, design decisions, implementation phases, risks |
-| This README | Quick start, configuration reference, overview |
+| [docs/DESIGN.md](docs/DESIGN.md) | Full architecture, hook timing analysis, upstream contribution plan |
+| This README | Quick start, configuration reference, current status |
+
+---
 
 ## Roadmap
 
-- **v0.1.0** — Core gateway pattern, bidirectional filtering, owner bypass
-- **v0.2.0** — Vector scanning, 1Password integration, hash cache
-- **v0.3.0** — Multi-language support, admin dashboard, metrics
-- **v1.0.0** — Stable release, full test coverage, documentation
+### Phase 1: Input Filtering (v0.1.0) — Ready to Implement
+- ✅ Prompt injection detection via `message:received` hook
+- ✅ Jailbreak prevention
+- ✅ Owner bypass for trusted users
+- ✅ Multi-language support (10 languages)
 
-See [docs/DESIGN.md](docs/DESIGN.md) for detailed implementation phases.
+### Phase 2: Upstream Contribution — In Progress
+- 🔄 Contribute `before_tool_result` hook to OpenClaw
+- 🔄 Implement at SDK level (all tools)
+- 🔄 Tests and documentation
+
+### Phase 3: Output Filtering (v0.2.0) — After Upstream Merge
+- ⏳ Tool output scanning via new hook
+- ⏳ PII detection and redaction
+- ⏳ Content safety filtering
+
+### Phase 4: Polish (v1.0.0)
+- Hash cache for performance
+- 1Password CLI integration
+- Admin dashboard
+- Comprehensive test suite
+
+See [docs/DESIGN.md](docs/DESIGN.md) for detailed implementation phases and the hook timing gap that necessitates this approach.
+
+---
+
+## Why Input First?
+
+The `message:received` hook fires **before** the LLM processes user messages, allowing us to block injection attempts immediately. This is fully functional and provides immediate value.
+
+Output filtering via `tool_result_persist` has a **timing gap** — it fires after the LLM has already seen the tool output. We're solving this by contributing a new `before_tool_result` hook to OpenClaw.
+
+See [docs/DESIGN.md](docs/DESIGN.md) for the technical analysis.
+
+---
+
+## Related Projects
+
+| Project | Focus | Complementary? |
+|---------|-------|----------------|
+| [Knostic Shield](https://github.com/knostic/openclaw-shield) | Secrets, PII, destructive commands | ✅ Yes — use both |
+| Our Prompt Defender | Prompt injection, jailbreak | ✅ Different threats |
+
+**Recommendation:** Use Knostic Shield for data protection + Our Prompt Defender for input validation.
+
+---
 
 ## License
 
@@ -188,4 +255,5 @@ Dual-licensed under MIT and Apache 2.0 (to match source projects).
 
 *Project created: 2026-02-11*  
 *Repository: https://github.com/crayon-doing-petri/openclaw-prompt-defender*  
-*Status: Phase 1 - Foundation*
+*Status: Phase 1 — Input filtering implementation*  
+*Upstream: Contributing `before_tool_result` hook to OpenClaw*
