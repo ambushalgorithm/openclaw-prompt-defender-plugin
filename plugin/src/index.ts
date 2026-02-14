@@ -11,12 +11,20 @@ interface ScanRequest {
   content: unknown;
   is_error: boolean;
   duration_ms: number;
+  source?: string;
 }
 
 interface ScanResponse {
   action: "allow" | "block" | "sanitize";
   reason?: string;
   sanitized_content?: unknown;
+  matches?: Array<{
+    pattern: string;
+    severity: string;
+    type: string;
+    lang: string;
+  }>;
+  owner_bypass?: boolean;
 }
 
 export default (api: OpenClawPluginApi) => {
@@ -24,31 +32,51 @@ export default (api: OpenClawPluginApi) => {
   const serviceUrl = (config.service_url as string) || "http://localhost:8080";
   const timeoutMs = (config.timeout_ms as number) || 5000;
   const failOpen = config.fail_open !== false;
-  const ownerIds = (config.owner_ids as string[]) || [];
   const scanEnabled = config.scan_enabled !== false;
-
-  api.logger.info(`Prompt Defender plugin initialized (service: ${serviceUrl})`);
+  
+  // Feature flags
+  const features = (config.features as any) || {};
+  const promptGuardEnabled = features.prompt_guard !== false;
+  
+  api.logger.info(`Prompt Defender plugin initialized`);
+  api.logger.info(`  Service URL: ${serviceUrl}`);
+  api.logger.info(`  Features: prompt_guard=${promptGuardEnabled}`);
 
   // Call the scanning service
   const scanContent = async (
-    event: PluginHookBeforeToolResultEvent
+    event: PluginHookBeforeToolResultEvent,
+    ctx: PluginHookToolContext
   ): Promise<ScanResponse | null> => {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
+      // Prepare headers with config and user ID
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      };
+      
+      // Pass configuration via header
+      if (config) {
+        headers["X-Config"] = JSON.stringify(config);
+      }
+      
+      // Pass user ID for owner bypass (if available)
+      if (ctx.userId) {
+        headers["X-User-ID"] = ctx.userId;
+      }
+
       const response = await fetch(`${serviceUrl}/scan`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
+        headers,
         body: JSON.stringify({
           type: "output",
           tool_name: event.toolName,
           content: event.content,
           is_error: event.isError,
-          duration_ms: event.durationMs,
+          duration_ms: event.durationMs || 0,
+          source: ctx.userId,
         } as ScanRequest),
         signal: controller.signal,
       });
@@ -95,18 +123,36 @@ export default (api: OpenClawPluginApi) => {
         api.logger.debug(`[Prompt Defender] Scanning disabled`);
         return;
       }
+      
+      // Check if prompt_guard feature is enabled
+      if (!promptGuardEnabled) {
+        api.logger.debug(`[Prompt Defender] prompt_guard feature disabled`);
+        return;
+      }
 
       api.logger.info(`[Prompt Defender] Scanning tool result: ${toolName} (callId: ${toolCallId})`);
 
-      const result = await scanContent(event);
+      const result = await scanContent(event, ctx);
 
       if (!result) {
         // Fail-open: allow through
         return;
       }
+      
+      // Log owner bypass
+      if (result.owner_bypass) {
+        api.logger.info(`[Prompt Defender] Owner bypass for user ${ctx.userId}`);
+        return;
+      }
 
       if (result.action === "block") {
-        api.logger.warn(`[Prompt Defender] BLOCKED ${toolName}: ${result.reason}`);
+        const matchCount = result.matches?.length || 0;
+        const categories = result.matches?.map(m => m.type).join(", ") || "unknown";
+        
+        api.logger.warn(
+          `[Prompt Defender] BLOCKED ${toolName}: ${matchCount} pattern(s) matched (${categories})`
+        );
+        
         return {
           block: true,
           blockReason: result.reason || "Blocked by Prompt Defender",
