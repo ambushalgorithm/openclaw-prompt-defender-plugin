@@ -178,6 +178,72 @@ By default, the plugin uses **fail-open** strategy: if the security service is u
 
 ---
 
+## Logging
+
+The service logs all security events to `~/.openclaw/logs/` following OpenClaw's standard logging pattern:
+
+### Log Files
+
+```
+~/.openclaw/logs/
+├── config-audit.jsonl                     # OpenClaw system logs
+├── prompt-defender-threats.jsonl          # Blocked attacks only
+├── prompt-defender-scans.jsonl            # All scan events (allowed + blocked)
+└── prompt-defender-summary.json           # Daily statistics
+```
+
+### Log Format (JSONL)
+
+**Threats** (`prompt-defender-threats.jsonl`):
+```json
+{"timestamp":"2026-02-14T13:45:32.123456","severity":"high","tool":"message","patterns":["ignore all previous","disregard your guidelines"],"categories":["instruction_override","jailbreak"],"content_hash":"a1b2c3d4e5f6g7h8"}
+```
+
+**Scans** (`prompt-defender-scans.jsonl`):
+```json
+{"timestamp":"2026-02-14T13:45:32.789012","action":"block","tool_name":"message","severity":"high","pattern_count":2,"duration_ms":12,"categories":["instruction_override","jailbreak"]}
+{"timestamp":"2026-02-14T13:46:10.456789","action":"allow","tool_name":"message","severity":"safe","pattern_count":0,"duration_ms":3}
+```
+
+### Statistics Endpoint
+
+```bash
+# Get threat stats for last 24 hours
+curl http://127.0.0.1:8080/stats
+
+# Custom time window (last 7 days)
+curl http://127.0.0.1:8080/stats?hours=168
+```
+
+**Response:**
+```json
+{
+  "period_hours": 24,
+  "total_scans": 142,
+  "total_threats": 3,
+  "by_severity": {
+    "high": 2,
+    "medium": 1
+  },
+  "by_category": {
+    "instruction_override": 2,
+    "jailbreak": 1,
+    "secret_exfiltration": 1
+  },
+  "by_tool": {
+    "message": 3
+  }
+}
+```
+
+### Privacy
+
+- Content is **hashed** (SHA-256, first 16 chars) for deduplication
+- Full message content is **never logged** by default
+- Content preview logging can be enabled (commented out in `logger.py`)
+
+---
+
 ## Source Projects
 
 | Project | Location | License | Notes |

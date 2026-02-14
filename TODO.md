@@ -16,7 +16,8 @@
 
 ## Phase 3: Expand Detection Methods
 
-- [ ] **ASK BEFORE CONTINUING**
+- [x] Persistent logging (JSONL format, ~/.openclaw/logs/) ✅
+- [ ] **ASK BEFORE CONTINUING** for next steps
 - [ ] Add pattern categories (SHIELD categories from prompt-guard)
 - [ ] Add owner bypass
 - [ ] Add hash cache (token reduction)

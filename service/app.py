@@ -3,8 +3,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Any
+import time
+
+from logger import get_logger
 
 app = FastAPI(title="Prompt Defender Security Service")
+logger = get_logger()
 
 # Allow CORS for local development
 app.add_middleware(
@@ -67,22 +71,54 @@ def scan_content(content: Any) -> tuple[bool, list[dict]]:
 @app.post("/scan", response_model=ScanResponse)
 async def scan(request: ScanRequest):
     """Scan tool result for prompt injection attempts."""
+    start_time = time.time()
+    
     # Convert content to string for scanning
     content_str = str(request.content)
     
     is_dangerous, matches = scan_content(request.content)
     
+    duration_ms = int((time.time() - start_time) * 1000)
+    
     if is_dangerous:
+        severity = "high" if len(matches) >= 3 else "medium"
+        
         # Log the match
         print(f"[PROMPT DEFENDER] Blocked {request.tool_name}: {len(matches)} match(es)")
         for m in matches:
             print(f"  - {m['pattern']}: {m['type']}")
+        
+        # Log threat to persistent storage
+        logger.log_threat(
+            severity=severity,
+            tool_name=request.tool_name,
+            matches=matches,
+            content=request.content,
+        )
+        
+        # Log scan event
+        logger.log_scan(
+            action="block",
+            tool_name=request.tool_name,
+            severity=severity,
+            matches=matches,
+            duration_ms=duration_ms,
+        )
         
         return ScanResponse(
             action="block",
             reason=f"Potential prompt injection detected ({len(matches)} pattern(s) matched)",
             matches=matches
         )
+    
+    # Log allowed scan
+    logger.log_scan(
+        action="allow",
+        tool_name=request.tool_name,
+        severity="safe",
+        matches=[],
+        duration_ms=duration_ms,
+    )
     
     # Allow through
     return ScanResponse(action="allow")
@@ -103,6 +139,11 @@ async def list_patterns():
         "patterns": DANGEROUS_PATTERNS,
         "count": len(DANGEROUS_PATTERNS)
     }
+
+@app.get("/stats")
+async def get_stats(hours: int = 24):
+    """Get threat statistics for the last N hours."""
+    return logger.get_stats(hours=hours)
 
 if __name__ == "__main__":
     import uvicorn
