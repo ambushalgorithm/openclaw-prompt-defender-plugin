@@ -283,9 +283,25 @@
 6. Commit and push
 
 ### Branch Strategy
-- Development happens on `master`
-- Testing uses `~/Projects/openclaw-development` (custom OpenClaw with `before_tool_result` hook)
-- Production ready when Phase 4 complete
+
+**Our Repository** (`~/Projects/openclaw-plugins/openclaw-prompt-defender`):
+- Branch: `master`
+- All development happens here
+- Plugin code, service code, tests, documentation
+
+**OpenClaw Repository** (`~/Projects/openclaw-development`):
+- Branch: `feat/before-tool-result` (has the `before_tool_result` hook)
+- **Read-only** - we do NOT modify any OpenClaw code
+- Used ONLY for testing our plugin with the hook
+- We switch to this branch when running integration tests
+
+**Testing Workflow:**
+1. Develop in `~/Projects/openclaw-plugins/openclaw-prompt-defender`
+2. Run unit tests: `pytest` (no OpenClaw needed)
+3. Run integration tests: Use Docker containers
+4. Full E2E tests: Docker + OpenClaw from `feat/before-tool-result` branch
+
+**Production Ready:** When Phase 4 complete and all tests passing
 
 ---
 
