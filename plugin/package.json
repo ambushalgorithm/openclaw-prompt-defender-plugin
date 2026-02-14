@@ -1,0 +1,13 @@
+{
+  "name": "openclaw-prompt-defender",
+  "version": "0.1.0",
+  "description": "Prompt injection detection and jailbreak prevention for OpenClaw",
+  "main": "dist/prompt-defender/index.js",
+  "scripts": {
+    "build": "tsc && cp ./openclaw.plugin.json ./dist/prompt-defender/openclaw.plugin.json",
+    "dev": "tsc --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  }
+}

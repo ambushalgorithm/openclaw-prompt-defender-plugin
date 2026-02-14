@@ -1,0 +1,37 @@
+{
+  "id": "prompt-defender",
+  "name": "openclaw-prompt-defender",
+  "version": "0.1.0",
+  "description": "Prompt injection detection and jailbreak prevention for OpenClaw",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "service_url": {
+        "type": "string",
+        "default": "http://localhost:8080",
+        "description": "URL of the security scanning service"
+      },
+      "timeout_ms": {
+        "type": "number",
+        "default": 5000,
+        "description": "Timeout for service requests in milliseconds"
+      },
+      "fail_open": {
+        "type": "boolean",
+        "default": true,
+        "description": "Allow tool results if service is unavailable"
+      },
+      "owner_ids": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Trusted user IDs that bypass scanning"
+      },
+      "scan_enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable/disable scanning"
+      }
+    },
+    "required": ["service_url"]
+  }
+}
