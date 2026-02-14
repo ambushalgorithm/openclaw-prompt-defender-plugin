@@ -1,0 +1,56 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.2.4",
+    "description": "Template config for openclaw-prompt-defender Docker testing"
+  },
+  "models": {
+    "providers": {
+      "anthropic": {
+        "apiKey": "${ANTHROPIC_API_KEY}",
+        "models": [
+          {
+            "id": "claude-sonnet-4-5",
+            "name": "Claude Sonnet 4.5",
+            "reasoning": false,
+            "input": ["text", "image"],
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          }
+        ]
+      }
+    },
+    "default": "anthropic/claude-sonnet-4-5"
+  },
+  "plugins": {
+    "enabled": true,
+    "entries": {
+      "prompt-defender": {
+        "enabled": true,
+        "config": {
+          "service_url": "http://prompt-defender-service:8080",
+          "timeout_ms": 5000,
+          "fail_open": true,
+          
+          "owner_ids": ["test-owner-123"],
+          
+          "features": {
+            "prompt_guard": true,
+            "ml_detection": false,
+            "secret_scanner": false,
+            "content_moderation": false
+          },
+          
+          "prompt_guard": {
+            "scan_tier": 1,
+            "hash_cache": true,
+            "decode_base64": true,
+            "multilang": ["en", "ko", "ja", "zh"]
+          }
+        }
+      }
+    }
+  },
+  "logging": {
+    "level": "debug"
+  }
+}

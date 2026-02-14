@@ -10,7 +10,10 @@ venv/
 dist/
 build/
 
-# Logs are stored in ~/.openclaw/logs/ (not in repo)
+# Logs (Docker testing)
+logs/
+
+# Logs are stored in ~/.openclaw/logs/ in production (not in repo)
 
 # IDE
 .vscode/

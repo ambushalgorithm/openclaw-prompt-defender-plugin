@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # Security scanning service
+  prompt-defender-service:
+    build:
+      context: ./service
+      dockerfile: Dockerfile
+    container_name: prompt-defender-service
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount logs directory for persistent logging
+      - ./logs:/root/.openclaw/logs
+    environment:
+      - OPENCLAW_HOME=/root/.openclaw
+      - LOG_LEVEL=debug
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - openclaw-test
+
+  # OpenClaw instance with prompt-defender plugin
+  # (To be added in future - requires OpenClaw Docker image)
+  # openclaw:
+  #   image: openclaw:latest
+  #   container_name: openclaw-test
+  #   depends_on:
+  #     - prompt-defender-service
+  #   volumes:
+  #     - ./openclaw.template.json:/root/.openclaw/openclaw.json:ro
+  #     - ./plugin/dist:/root/.openclaw/extensions/prompt-defender:ro
+  #     - ./logs:/root/.openclaw/logs
+  #   environment:
+  #     - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+  #   networks:
+  #     - openclaw-test
+
+networks:
+  openclaw-test:
+    driver: bridge
+
+volumes:
+  logs:

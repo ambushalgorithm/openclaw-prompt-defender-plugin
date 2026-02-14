@@ -94,50 +94,80 @@ openclaw-prompt-defender/
 
 ## Quick Start
 
-### Development Setup (Local)
-
-```bash
-# 1. Install service dependencies
-cd ~/Projects/openclaw-plugins/openclaw-prompt-defender/service
-pip install -r requirements.txt
-
-# 2. Start the service
-python app.py
-# → Service running on http://127.0.0.1:8080
-
-# 3. Build plugin (separate terminal)
-cd ~/Projects/openclaw-plugins/openclaw-prompt-defender/plugin
-npm install && npm run build
-
-# 4. Configure OpenClaw (~/.openclaw/openclaw.json)
-# See Configuration section below
-
-# 5. Restart OpenClaw
-openclaw gateway restart
-```
+**⚠️ IMPORTANT: All testing must be done in Docker containers. NEVER modify `~/.openclaw/openclaw.json` or restart the production gateway for testing.**
 
 ### Docker Testing (End-to-End)
 
-**All testing is done in Docker containers** to ensure reproducibility:
+**Option 1: Using docker-compose (recommended)**
 
 ```bash
-# Start service container
-cd ~/Projects/openclaw-plugins/openclaw-prompt-defender/service
-docker build -t prompt-defender:latest .
-docker run -d \
-  -p 8080:8080 \
-  -v ~/.openclaw/logs:/root/.openclaw/logs \
-  --name prompt-defender \
-  prompt-defender:latest
+cd ~/Projects/openclaw-plugins/openclaw-prompt-defender
 
-# Test the service
+# Start service
+docker-compose up -d prompt-defender-service
+
+# Verify service is running
 curl http://localhost:8080/health
 
-# Run end-to-end tests
-docker exec -it prompt-defender pytest tests/
+# Run tests
+docker-compose exec prompt-defender-service pytest tests/
+
+# Check logs
+docker-compose logs -f prompt-defender-service
+
+# Stop service
+docker-compose down
 ```
 
-**Note:** Plugin integration testing requires OpenClaw running with the `before_tool_result` hook. See [Testing](#testing) section.
+**Option 2: Manual Docker commands**
+
+```bash
+# Build and run service
+cd service
+docker build -t prompt-defender-service:latest .
+docker run -d -p 8080:8080 --name prompt-defender-service prompt-defender-service:latest
+
+# Test and view logs
+curl http://localhost:8080/health
+docker exec -it prompt-defender-service pytest tests/
+docker logs -f prompt-defender-service
+
+# Cleanup
+docker stop prompt-defender-service
+docker rm prompt-defender-service
+```
+
+### Service Development Only (No OpenClaw Integration)
+
+If you're **only** working on the Python service (not testing with OpenClaw):
+
+```bash
+cd service
+pip install -r requirements.txt
+python app.py  # Runs on http://127.0.0.1:8080
+
+# Test endpoints directly
+curl -X POST http://127.0.0.1:8080/scan \
+  -H "Content-Type: application/json" \
+  -d '{"type":"output","tool_name":"test","content":"test content"}'
+```
+
+**Note:** This does NOT test OpenClaw integration. Full integration testing requires Docker.
+
+---
+
+## Docker Testing Configuration
+
+**⚠️ NEVER modify `~/.openclaw/openclaw.json` for testing!**
+
+The repository includes `openclaw.template.json` for Docker-based testing:
+
+- Safe test configuration (not your production config)
+- Test owner IDs (not your real IDs)
+- Service URL for Docker network (`http://prompt-defender-service:8080`)
+- Debug logging enabled
+
+**This file is used ONLY inside Docker containers.** It never touches your production OpenClaw installation.
 
 ---
 
