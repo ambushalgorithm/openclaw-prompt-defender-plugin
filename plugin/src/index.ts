@@ -62,9 +62,9 @@ export default (api: OpenClawPluginApi) => {
         headers["X-Config"] = JSON.stringify(config);
       }
       
-      // Pass user ID for owner bypass (if available)
-      if (ctx.userId) {
-        headers["X-User-ID"] = ctx.userId;
+      // Pass session key for owner bypass (if available)
+      if (ctx.sessionKey) {
+        headers["X-Session-Key"] = ctx.sessionKey;
       }
 
       const response = await fetch(`${serviceUrl}/scan`, {
@@ -76,7 +76,7 @@ export default (api: OpenClawPluginApi) => {
           content: event.content,
           is_error: event.isError,
           duration_ms: event.durationMs || 0,
-          source: ctx.userId,
+          source: ctx.sessionKey,
         } as ScanRequest),
         signal: controller.signal,
       });
@@ -141,7 +141,7 @@ export default (api: OpenClawPluginApi) => {
       
       // Log owner bypass
       if (result.owner_bypass) {
-        api.logger.info(`[Prompt Defender] Owner bypass for user ${ctx.userId}`);
+        api.logger.info(`[Prompt Defender] Owner bypass for session ${ctx.sessionKey}`);
         return;
       }
 
