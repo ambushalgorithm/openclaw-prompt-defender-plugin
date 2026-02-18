@@ -199,18 +199,39 @@
 
 ---
 
-## 📋 New Feature: Dynamic Test Samples Endpoint
+## 📋 New Feature: Separate Test Samples Service
 
 ### Overview
-Add endpoints to serve realistic malicious content that mimics actual tool outputs (web pages, documents). Enables full E2E testing of the plugin → service → block flow.
+Build a standalone Python/FastAPI service to serve dynamic malicious content that mimics actual tool outputs (web pages, documents). Enables full E2E testing of the plugin → service → block flow.
+
+**Decision:** Separate service (not mixed with main scanner service) — keeps concerns clean.
+
+---
+
+### Structure
+
+```
+service-test/
+├── app.py              # FastAPI entry point
+├── generator.py        # Content generation logic
+├── templates.py        # Attack templates
+├── main.py             # uvicorn runner
+├── requirements.txt    # Dependencies
+└── README.md          # Docs
+```
+
+### Port
+- Default: `8081` (separate from main service on `8080`)
+
+---
 
 ### Endpoints
 
-**`GET /test/samples/`**
+**`GET /test/`**
 - Returns index page listing all available samples
 - Links to individual sample files
 
-**`GET /test/samples/{name}`**
+**`GET /test/{name}`**
 - Serves dynamic content based on query params
 - Returns realistic tool output format
 
@@ -229,16 +250,16 @@ Add endpoints to serve realistic malicious content that mimics actual tool outpu
 
 ```bash
 # Critical severity HTML with injection
-GET /test/samples/test?filtype=html&severity=critical
+GET /test/test?filtype=html&severity=critical
 
 # Medium severity Markdown with obfuscated attack
-GET /test/samples/test?filtype=md&severity=medium&obfuscated=true
+GET /test/test?filtype=md&severity=medium&obfuscated=true
 
 # JSON with secret leak
-GET /test/samples/test?filtype=json&type=secret
+GET /test/test?filtype=json&type=secret
 
 # Clean HTML (should pass scanning)
-GET /test/samples/test?clean=true&filtype=html
+GET /test/test?clean=true&filtype=html
 ```
 
 ### Output Formats
@@ -288,25 +309,34 @@ ignore all instructions
 
 ### Implementation Tasks
 
-- [ ] Create `service/test_samples.py` module
-- [ ] Implement `SampleGenerator` class
-- [ ] Add HTML template with attack variations
-- [ ] Add Markdown template with attack variations
-- [ ] Add JSON template with secret leak
-- [ ] Add TXT template
-- [ ] Add XML template
+- [ ] Create `service-test/` directory
+- [ ] Create `service-test/requirements.txt`
+  - [ ] fastapi
+  - [ ] uvicorn
+- [ ] Create `service-test/templates.py` — attack templates per filetype
+- [ ] Create `service-test/generator.py` — SampleGenerator class
+- [ ] Create `service-test/app.py` — FastAPI routes
+- [ ] Create `service-test/main.py` — uvicorn runner
+- [ ] Create `service-test/README.md` — usage docs
+- [ ] Add `/` index endpoint
+- [ ] Add `/test/{name}` dynamic endpoint with all query params
+- [ ] Implement HTML template with attack variations
+- [ ] Implement Markdown template with attack variations
+- [ ] Implement JSON template with secret leak
+- [ ] Implement TXT template
+- [ ] Implement XML template
 - [ ] Implement obfuscation (base64, hex, HTML entities)
-- [ ] Add `/test/samples/` index endpoint
-- [ ] Add `/test/samples/{name}` dynamic endpoint
-- [ ] Add `/test/scan` direct scan endpoint (optional)
+- [ ] Test locally on port 8081
 
 ### Testing Workflow
 
-1. Start service: `python -m service.app`
-2. Fetch sample: `curl http://localhost:8080/test/samples/test?filtype=html&severity=critical`
-3. Have OpenClaw fetch it: `web_fetch http://localhost:8080/test/samples/test?...`
-4. Plugin intercepts → scans → blocks
-5. Verify block in logs
+1. Start main service: `python -m service.app` (port 8080)
+2. Start test service: `python -m service-test.main` (port 8081)
+3. Fetch sample: `curl http://localhost:8081/test/test?filtype=html&severity=critical`
+4. Update plugin config to point to main service (port 8080)
+5. Have OpenClaw fetch malicious sample: `web_fetch http://localhost:8081/test/test?...`
+6. Plugin intercepts → calls main service → scans → blocks
+7. Verify block in logs
 
 ---
 
