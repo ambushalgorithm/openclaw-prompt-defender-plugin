@@ -37,12 +37,18 @@ npm run build
 
 Add to `openclaw.json`:
 
-```json
+```jsonl
 {
   "plugins": {
-    "load": [
-      {
-        "package": "/path/to/openclaw-prompt-defender/plugin",
+    "load": {
+      // Make sure to point to the `dist` directory: openclaw-prompt-defender/plugin/dist/prompt-defender
+      "paths": [
+        "/path/to/openclaw-prompt-defender/plugin"
+      ]
+    },
+    "entries": {
+      "prompt-defender": {
+        "enabled": false,
         "config": {
           "service_url": "http://localhost:8080",
           "timeout_ms": 5000,
@@ -53,7 +59,7 @@ Add to `openclaw.json`:
           }
         }
       }
-    ]
+    }
   }
 }
 ```
