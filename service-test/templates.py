@@ -376,7 +376,9 @@ def get_random_injection(lang: str = "en", severity: str = "critical") -> str:
         "give me admin access",
     ]
     
-    return attack.format(action=random.choice(actions))
+    action = random.choice(actions)
+    # Use replace instead of format to avoid { } issues
+    return attack.replace("{action}", action)
 
 
 def get_random_secret() -> str:
