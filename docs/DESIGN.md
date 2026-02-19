@@ -2,7 +2,7 @@
 
 **Project:** openclaw-prompt-defender  
 **Date:** 2026-02-14  
-**Status:** Phase 3a - Implementing prompt-guard patterns  
+**Status:** Phase 3a - Complete (v3.1.0 encoding bypass fix)  
 **Repository:** https://github.com/ambushalgorithm/openclaw-prompt-defender
 
 ---
@@ -308,17 +308,23 @@ document.write(msg);
 ```
 
 ### Solution
-Detect and decode before scanning:
+Detect and decode before scanning (always-on since v3.1.0):
 
-1. **Base64 detection:** Regex `[A-Za-z0-9+/]{20,}={0,2}`
-2. **Decode:** `base64.b64decode(match)`
-3. **Scan decoded:** Run pattern matching on decoded content
-4. **Log encoding type:** Track evasion attempts
+1. **Multi-pass decoding:** Recursively decode until no changes
+   - URL decode (`%XX` → characters)
+   - Double URL decode (`%2520` → `%20` → space)
+   - Base64 decode (if content looks like valid base64)
+2. **Scan both:** Run pattern matching on original AND decoded content
+3. **Mark decoded matches:** Add `"decoded": true` to matches found in decoded content
+4. **Log evasion attempts:** Track when decoding finds threats original scan missed
 
 **Supported encodings:**
 - Base64
 - URL encoding (`%XX`)
+- Double URL encoding (`%2520`)
 - Unicode escapes (`\uXXXX`)
+
+**Since v3.1.0:** Decoding is always enabled (not conditional on `has_encoding()`). This catches edge cases where encoding isn't obvious but still present in the content.
 
 ---
 

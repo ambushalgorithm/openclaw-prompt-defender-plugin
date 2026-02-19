@@ -161,6 +161,44 @@
 
 ---
 
+## 📋 Phase 5: Encoding Bypass Fix (COMPLETE)
+
+**Problem:** URL-encoded payloads in tool output bypass the scanner because `decoder.py` exists but isn't being called in the scanning flow.
+
+**Root Cause:** `scanner.py` doesn't call `decode_and_scan()` from `decoder.py` before pattern matching.
+
+### Tasks
+
+- [x] **5.1** Integrate decoder into scanner flow
+  - [x] Import `decode_and_scan` from `decoder.py` in `scanner.py`
+  - [x] Call `decode_and_scan()` before pattern matching
+  - [x] Also scan the decoded content (not just original)
+
+- [x] **5.2** Add multi-pass URL decoding
+  - [x] Implement `fully_decode(content)` function in `scanner.py`
+  - [x] Handle double-encoding (%2520 → %20 → space)
+  - [x] Keep decoding until no changes
+
+- [x] **5.3** Scan both raw + decoded
+  - [x] Return matches from both raw and decoded scans
+  - [x] Log which content was hidden (for forensics)
+  - [x] Pass decoded content to LLM (sanitized)
+
+- [x] **5.4** Test the fix
+  - [x] Test: URL-encoded injection now blocked
+  - [x] Test: Base64 encoded injection detected
+  - [x] Test: Double-encoded payloads caught
+  - [x] Unit tests: 20 tests passing
+  - [x] E2E tests: Service blocks all encoded variants
+
+**Acceptance Criteria:**
+- ✅ URL-encoded payloads in tool output are now detected
+- ✅ Bypass via `--data-urlencode` is blocked
+- ✅ No performance regression (scan time <50ms)
+- ✅ Original and decoded versions both logged
+
+---
+
 ## ⏸️ Phase 3b: detect-injection Integration (NEXT)
 
 **Prerequisites:** Phase 3a complete

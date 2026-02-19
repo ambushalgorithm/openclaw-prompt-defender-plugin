@@ -7,14 +7,19 @@ Implements progressive pattern loading:
 - Tier 2: Medium patterns (tier >= 2)
 
 Includes hash cache for ~70% token reduction on repeated content.
+
+Also includes encoding detection and decoding to catch obfuscated attacks.
 """
 
 import re
 import hashlib
 import time
+import base64
 from typing import List, Dict, Tuple, Optional
+from urllib.parse import unquote
 
 from patterns import CRITICAL_PATTERNS, HIGH_PATTERNS, MEDIUM_PATTERNS, Pattern
+import decoder
 
 
 class TieredScanner:
@@ -52,7 +57,8 @@ class TieredScanner:
         self,
         content: str,
         tier: int = 1,
-        use_cache: bool = True
+        use_cache: bool = True,
+        decode_content: bool = True
     ) -> Tuple[bool, List[Dict], int]:
         """
         Scan content with tiered pattern loading.
@@ -61,6 +67,7 @@ class TieredScanner:
             content: Text to scan
             tier: Scan tier (0=critical, 1=+high, 2=+medium)
             use_cache: Whether to use hash cache
+            decode_content: Whether to also scan decoded content
         
         Returns:
             (is_dangerous, matches, duration_ms)
@@ -69,14 +76,50 @@ class TieredScanner:
         
         # Check cache
         if use_cache:
-            content_hash = self._hash_content(content)
-            if content_hash in self.cache:
+            # Include decode flag in cache key
+            cache_key = self._hash_content(content + f":decode={decode_content}")
+            if cache_key in self.cache:
                 self.cache_hits += 1
-                is_dangerous, matches = self.cache[content_hash]
+                is_dangerous, matches = self.cache[cache_key]
                 duration_ms = int((time.time() - start_time) * 1000)
                 return is_dangerous, matches, duration_ms
             self.cache_misses += 1
         
+        matches = []
+        
+        # Scan original content
+        matches.extend(self._scan_all_tiers(content, tier))
+        
+        # Also scan decoded content if enabled
+        if decode_content:
+            decoded = fully_decode(content)
+            if decoded != content:
+                decoded_matches = self._scan_all_tiers(decoded, tier)
+                # Mark decoded matches
+                for m in decoded_matches:
+                    m["decoded"] = True
+                matches.extend(decoded_matches)
+        
+        # Deduplicate matches
+        seen = set()
+        unique_matches = []
+        for m in matches:
+            key = (m["pattern"], m["severity"], m["type"])
+            if key not in seen:
+                seen.add(key)
+                unique_matches.append(m)
+        
+        is_dangerous = len(unique_matches) > 0
+        
+        # Update cache
+        if use_cache:
+            self._update_cache(cache_key, (is_dangerous, unique_matches))
+        
+        duration_ms = int((time.time() - start_time) * 1000)
+        return is_dangerous, unique_matches, duration_ms
+    
+    def _scan_all_tiers(self, content: str, tier: int) -> List[Dict]:
+        """Scan content against all applicable tiers."""
         matches = []
         
         # Tier 0: Critical (always load)
@@ -93,14 +136,7 @@ class TieredScanner:
             medium_matches = self._scan_tier(content, self._compiled_medium)
             matches.extend(medium_matches)
         
-        is_dangerous = len(matches) > 0
-        
-        # Update cache
-        if use_cache:
-            self._update_cache(content_hash, (is_dangerous, matches))
-        
-        duration_ms = int((time.time() - start_time) * 1000)
-        return is_dangerous, matches, duration_ms
+        return matches
     
     def _scan_tier(
         self,
@@ -175,6 +211,53 @@ class TieredScanner:
 
 # Global scanner instance
 _scanner: Optional[TieredScanner] = None
+
+
+def fully_decode(content: str) -> str:
+    """
+    Recursively decode content until no more changes.
+    
+    Handles:
+    - URL encoding (%XX)
+    - Double URL encoding (%2520 -> %20 -> space)
+    - Base64 encoding (only if it looks like base64)
+    
+    Returns the fully decoded content.
+    """
+    if not content:
+        return content
+    
+    previous = None
+    current = content
+    
+    # Keep decoding until nothing changes
+    max_iterations = 5  # Prevent infinite loops
+    for _ in range(max_iterations):
+        if current == previous:
+            break
+        previous = current
+        
+        # URL decode
+        decoded = unquote(current)
+        if decoded != current:
+            current = decoded
+            continue
+        
+        # Only try base64 if it looks like base64 (no URL special chars)
+        # Base64 should only have A-Za-z0-9+/= and be at least 20 chars
+        if len(current) >= 20 and re.match(r'^[A-Za-z0-9+/=]+$', current):
+            try:
+                decoded_bytes = base64.b64decode(current, validate=True)
+                decoded = decoded_bytes.decode('utf-8', errors='ignore')
+                
+                # Check if decoded content is meaningful
+                if len(decoded) > 10 and sum(c.isprintable() for c in decoded) / len(decoded) > 0.7:
+                    current = decoded
+                    continue
+            except (base64.binascii.Error, ValueError, UnicodeDecodeError):
+                pass
+    
+    return current
 
 
 def get_scanner() -> TieredScanner:

@@ -37,11 +37,12 @@ npm run build
 
 Add to `openclaw.json`:
 
-```jsonl
+```json
 {
   "plugins": {
     "load": {
-      // Make sure to point to the `dist` directory: openclaw-prompt-defender/plugin/dist/prompt-defender
+      // Make sure to point to the `dist/prompt-defender` directory: 
+      // openclaw-prompt-defender/plugin/dist/prompt-defender
       "paths": [
         "/path/to/openclaw-prompt-defender/plugin"
       ]
