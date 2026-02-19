@@ -317,11 +317,11 @@ This prevents security filter outages from breaking the agent.
 
 All end-to-end testing is done in Docker containers.
 
-The [openclaw-prompt-defender-test-samples](https://github.com/ambushalgorithm/openclaw-prompt-defender-test-samples) repo provides dynamic malicious test content for integration testing.
+The [prompt-injection-testing](https://github.com/ambushalgorithm/prompt-injection-testing) repo provides dynamic malicious test content for integration testing.
 
 ```bash
 # Clone the test samples service
-git clone https://github.com/ambushalgorithm/openclaw-prompt-defender-test-samples.git service-test
+git clone https://github.com/ambushalgorithm/prompt-injection-testing.git prompt-injection-testing
 cd service-test
 
 # Install and run
