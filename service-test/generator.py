@@ -123,7 +123,7 @@ class SampleGenerator:
 <body>
     <h1>Welcome to Our Test Site</h1>
     <p>This is a normal paragraph.</p>
- with some content    <p>Another paragraph here with more text.</p>
+    <p>Another paragraph here with more text.</p>
 
     {template}
 
