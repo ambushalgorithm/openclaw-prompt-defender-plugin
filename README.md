@@ -1,463 +1,227 @@
-# openclaw-prompt-defender
+# 🛡️ openclaw-prompt-defender
 
-Built with: Claude Sonnet 4.5 • OpenClaw v2026.2.4 (custom branch with `before_tool_result` hook)
+<p align="center">
+  <img src="https://img.shields.io/badge/Plugin-TypeScript-blue?style=for-the-badge&logo=typescript" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Service-Python-cyan?style=for-the-badge&logo=python" alt="Python">
+  <img src="https://img.shields.io/badge/OpenClaw-v2026.2.4-green?style=for-the-badge" alt="OpenClaw">
+  <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License">
+</p>
 
-**Prompt injection detection and jailbreak prevention** for OpenClaw — combining the best detection methods from `prompt-guard`, `detect-injection`, and `openclaw-shield` using the **Plugin Gateway Pattern**.
+> Prompt injection detection and jailbreak prevention for OpenClaw — scans tool outputs before they reach the LLM.
 
-**Current Status:** 🔄 **Phase 3a** - Implementing prompt-guard patterns (500+ regex patterns across 3 tiers)
+## ✨ What is this?
 
-**Testing:** All end-to-end tests run in Docker containers for reproducibility.
+**openclaw-prompt-defender** is a security plugin that protects your AI assistant from malicious inputs hidden in tool outputs. It intercepts results from tools like `web_fetch`, `exec`, and `read` before they reach the LLM, scanning for:
 
----
+- 🎯 **Prompt injection attacks** — Attempts to override your AI's instructions
+- 🔓 **Jailbreak attempts** — Tricks to bypass safety guidelines  
+- 🔑 **Secret leaks** — Accidental exposure of API keys, tokens, passwords
+- 👤 **PII exposure** — Personal information that shouldn't be shared
+- 💉 **Malicious content** — XSS, SQL injection, RCE attempts
 
-## Overview
+## 🚀 Quick Start
 
-A security plugin that scans **tool outputs** before they reach the LLM, preventing:
-- Prompt injection attacks
-- Jailbreak attempts
-- Secret/credential leakage
-- PII exposure
-- Malicious content injection
+### Prerequisites
 
-**Sequential feature rollout:**
-1. ✅ **Phase 1-2**: Core infrastructure (plugin + service + logging)
-2. 🔄 **Phase 3a**: prompt-guard implementation (500+ regex patterns)
-3. ⏸️ **Phase 3b**: detect-injection (ML-based detection)
-4. ⏸️ **Phase 3c**: openclaw-shield (secrets/PII patterns)
+- OpenClaw v2026.2.4+
+- Python 3.12+
+- Docker (for testing)
 
-Each feature is **independently toggleable** via feature flags.
-
----
-
-## How It Works
-
-**High-Level Flow:**
-
-1. Tool executes (e.g., `web_fetch`, `exec`, `read`)
-2. `before_tool_result` hook intercepts the output
-3. Plugin sends output to security service for scanning
-4. Service checks patterns (and optionally ML models)
-5. Returns verdict: ALLOW, BLOCK, or SANITIZE
-6. Plugin enforces verdict before LLM sees the content
-
-**Why separate plugin and service?**
-- Plugin (TypeScript) → Runs in OpenClaw's sandbox, handles hooks
-- Service (Python) → Runs on host, has access to ML libraries and pattern matching
-
-See [docs/DESIGN.md](docs/DESIGN.md) for detailed architecture and algorithms.
-
----
-
-## Detection Methods (Feature Flags)
-
-Each scanner can be enabled/disabled independently:
-
-| Feature | Source | Patterns | Status |
-|---------|--------|----------|--------|
-| **prompt_guard** | [prompt-guard](https://github.com/seojoonkim/prompt-guard) | 500+ regex (3 tiers) | 🔄 Implementing |
-| **ml_detection** | [detect-injection](https://github.com/protectai/detect-injection) | HuggingFace DeBERTa | ⏸️ Phase 3b |
-| **secret_scanner** | [openclaw-shield](https://github.com/knostic/openclaw-shield) | Secrets/PII patterns | ⏸️ Phase 3c |
-| **content_moderation** | detect-injection | OpenAI API | ⏸️ Phase 3b |
-
----
-
-## Project Structure
-
-```
-openclaw-prompt-defender/
-├── docs/
-│   └── DESIGN.md           # Architecture, design decisions
-│
-├── plugin/                 # TypeScript (runs in OpenClaw sandbox)
-│   ├── src/
-│   │   ├── index.ts        # Main plugin entry (before_tool_result hook)
-│   │   └── types/types.d.ts
-│   ├── openclaw.plugin.json
-│   ├── package.json
-│   └── tsconfig.json
-│
-├── service/                # Python/FastAPI (runs on host)
-│   ├── app.py              # FastAPI service (/scan endpoint)
-│   ├── logger.py           # Persistent JSONL logging
-│   ├── patterns.py         # 🔄 Pattern definitions (YAML → Python)
-│   ├── scanner.py          # 🔄 Tiered scanning engine
-│   ├── decoder.py          # 🔄 Base64/encoding detection
-│   ├── config.py           # 🔄 Configuration management
-│   ├── requirements.txt
-│   └── Dockerfile          # For end-to-end testing
-│
-├── TODO.md                 # Current task list
-└── README.md               # This file
-```
-
----
-
-## Quick Start
-
-**⚠️ IMPORTANT: All testing must be done in Docker containers. NEVER modify `~/.openclaw/openclaw.json` or restart the production gateway for testing.**
-
-### Docker Testing (End-to-End)
-
-**Option 1: Using docker-compose (recommended)**
+### Installation
 
 ```bash
-cd ~/Projects/openclaw-plugins/openclaw-prompt-defender
+# Clone the plugin
+git clone https://github.com/ambushalgorithm/openclaw-prompt-defender.git
+cd openclaw-prompt-defender
 
-# Start service
-docker-compose up -d prompt-defender-service
+# Install Python dependencies
+cd service && pip install -r requirements.txt
 
-# Verify service is running
-curl http://localhost:8080/health
-
-# Run tests
-docker-compose exec prompt-defender-service pytest tests/
-
-# Check logs
-docker-compose logs -f prompt-defender-service
-
-# Stop service
-docker-compose down
+# Build the plugin
+cd ../plugin && npm install
 ```
 
-**Option 2: Manual Docker commands**
-
-```bash
-# Build and run service
-cd service
-docker build -t prompt-defender-service:latest .
-docker run -d -p 8080:8080 --name prompt-defender-service prompt-defender-service:latest
-
-# Test and view logs
-curl http://localhost:8080/health
-docker exec -it prompt-defender-service pytest tests/
-docker logs -f prompt-defender-service
-
-# Cleanup
-docker stop prompt-defender-service
-docker rm prompt-defender-service
-```
-
-### Service Development Only (No OpenClaw Integration)
-
-If you're **only** working on the Python service (not testing with OpenClaw):
+### Run the Service
 
 ```bash
 cd service
-pip install -r requirements.txt
-python app.py  # Runs on http://127.0.0.1:8080
+python -m app
+# Service runs on http://localhost:8080
+```
 
-# Test endpoints directly
-curl -X POST http://127.0.0.1:8080/scan \
+### Configuration
+
+Add to your OpenClaw config:
+
+```json
+{
+  "plugins": {
+    "enabled": ["prompt-defender"],
+    "prompt-defender": {
+      "url": "http://localhost:8080"
+    }
+  }
+}
+```
+
+## 🏗️ Architecture
+
+```
+User Input → OpenClaw → Tool Execution → [Plugin] → [Scanner Service] → LLM
+                                              ↓
+                                      Block if malicious
+```
+
+**Two-part design:**
+
+1. **Plugin** (TypeScript) — Runs in OpenClaw's sandbox, handles hooks
+2. **Service** (Python/FastAPI) — Runs on host, does pattern matching & ML detection
+
+## 🔍 Detection Methods
+
+| Method | Patterns | Use Case |
+|--------|----------|----------|
+| **prompt_guard** | 500+ regex | Core injection detection |
+| **ml_detection** | HuggingFace DeBERTa | Advanced ML-based detection |
+| **secret_scanner** | 50+ patterns | API keys, tokens, passwords |
+| **content_moderation** | OpenAI API | Policy violations |
+
+Each is independently toggleable via feature flags.
+
+## 📖 Usage Examples
+
+### Basic Scanning
+
+```bash
+# Scan text for threats
+curl -X POST "http://localhost:8080/scan" \
   -H "Content-Type: application/json" \
-  -d '{"type":"output","tool_name":"test","content":"test content"}'
+  -d '{"content": "Hello world"}'
 ```
 
-**Note:** This does NOT test OpenClaw integration. Full integration testing requires Docker.
-
----
-
-## Docker Testing Configuration
-
-**⚠️ NEVER modify `~/.openclaw/openclaw.json` for testing!**
-
-The repository includes `openclaw.template.json` for Docker-based testing:
-
-- Safe test configuration (not your production config)
-- Test owner IDs (not your real IDs)
-- Service URL for Docker network (`http://prompt-defender-service:8080`)
-- Debug logging enabled
-
-**This file is used ONLY inside Docker containers.** It never touches your production OpenClaw installation.
-
----
-
-## Configuration Reference
-
-### Top-Level Config
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `service_url` | string | `http://127.0.0.1:8080` | Security service endpoint |
-| `timeout_ms` | number | `5000` | Request timeout |
-| `fail_open` | boolean | `true` | Allow on service failure |
-| `owner_ids` | array | `[]` | Trusted user IDs (bypass scanning) |
-
-### Feature Flags (`features.*`)
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `prompt_guard` | `true` | 500+ regex patterns (3 tiers) |
-| `ml_detection` | `false` | HuggingFace ML model (requires `HF_TOKEN`) |
-| `secret_scanner` | `false` | Secrets/PII detection |
-| `content_moderation` | `false` | OpenAI API moderation (requires `OPENAI_API_KEY`) |
-
-### prompt_guard Config (`prompt_guard.*`)
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `scan_tier` | `1` | 0=critical, 1=+high, 2=+medium |
-| `hash_cache` | `true` | Skip repeated content (~70% token reduction) |
-| `decode_base64` | `true` | Detect Base64/URL encoded attacks |
-| `multilang` | `["en"]` | Languages to scan (en, ko, ja, zh, etc.) |
-
----
-
-## Tiered Scanning (prompt_guard)
-
-Patterns are loaded progressively for performance:
-
-- **Tier 0** (Critical): ~30 patterns, always loaded, <5ms
-- **Tier 1** (High): +70 patterns, loaded after critical match, <15ms
-- **Tier 2** (Medium): +200 patterns, deep scan mode, <50ms
-
-Result: ~70% faster scanning while maintaining accuracy. See [DESIGN.md](docs/DESIGN.md) for algorithm details.
-
----
-
-## Owner Bypass
-
-Trusted users skip all scanning for zero overhead:
+### Response
 
 ```json
 {
-  "owner_ids": ["1461460866850357345"]
+  "threat_detected": false,
+  "verdict": "ALLOW",
+  "matches": []
 }
 ```
 
-When a tool output is from an owner's action, the service returns immediate ALLOW without pattern matching.
+### Blocked Content
 
----
-
-## Logging
-
-All security events are logged to `~/.openclaw/logs/` in JSONL format:
-
-### Log Files
-
-```
-~/.openclaw/logs/
-├── config-audit.jsonl                     # OpenClaw system logs
-├── prompt-defender-threats.jsonl          # Blocked attacks only
-├── prompt-defender-scans.jsonl            # All scan events
-└── prompt-defender-summary.json           # Daily statistics
-```
-
-### Example Log Entries
-
-**Threat** (`prompt-defender-threats.jsonl`):
 ```json
-{"timestamp":"2026-02-14T13:45:32.123456","severity":"high","tool":"web_fetch","patterns":["ignore all previous","disregard your guidelines"],"categories":["instruction_override","jailbreak"],"content_hash":"a1b2c3d4e5f6g7h8"}
+{
+  "threat_detected": true,
+  "verdict": "BLOCK",
+  "matches": [
+    {
+      "pattern": "[INST]",
+      "type": "prompt_injection",
+      "severity": "critical"
+    }
+  ]
+}
 ```
 
-**Scan** (`prompt-defender-scans.jsonl`):
-```json
-{"timestamp":"2026-02-14T13:45:32.789012","action":"block","tool_name":"web_fetch","severity":"high","pattern_count":2,"duration_ms":12,"categories":["instruction_override","jailbreak"]}
-```
+## 🧪 Testing
 
-### Statistics API
+We use [prompt-injection-testing](https://github.com/ambushalgorithm/prompt-injection-testing) for generating test samples:
 
 ```bash
-curl http://127.0.0.1:8080/stats?hours=24
-```
-
-**Response:**
-```json
-{
-  "period_hours": 24,
-  "total_scans": 142,
-  "total_threats": 3,
-  "by_severity": {"high": 2, "medium": 1},
-  "by_category": {"instruction_override": 2, "jailbreak": 1},
-  "by_tool": {"web_fetch": 2, "exec": 1}
-}
-```
-
----
-
-## Detection Categories
-
-**Tier 0 (Critical):** Secret exfiltration, SQL injection, XSS, system destruction  
-**Tier 1 (High):** Instruction override, jailbreak, system impersonation  
-**Tier 2 (Medium):** Role manipulation, authority impersonation, context hijacking
-
-See [DESIGN.md](docs/DESIGN.md) for complete pattern category breakdown.
-
----
-
-## API Endpoints
-
-- `POST /scan` - Scan content for threats (returns action: allow/block/sanitize)
-- `GET /health` - Health check
-- `GET /stats?hours=24` - Threat statistics
-- `GET /patterns` - List active patterns
-
-See [DESIGN.md](docs/DESIGN.md) for detailed API documentation.
-
----
-
-## Error Handling
-
-**Fail-Open Strategy:**
-- Service unreachable → ALLOW + log warning
-- Service timeout → ALLOW + log warning
-- Service error → ALLOW + log error
-
-This prevents security filter outages from breaking the agent.
-
-**Override:**
-```json
-{
-  "fail_open": false  // Fail-closed: block on error
-}
-```
-
----
-
-## Testing
-
-All end-to-end testing is done in Docker containers.
-
-The [prompt-injection-testing](https://github.com/ambushalgorithm/prompt-injection-testing) repo provides dynamic malicious test content for integration testing.
-
-```bash
-# Clone the test samples service
-git clone https://github.com/ambushalgorithm/prompt-injection-testing.git prompt-injection-testing
-cd service-test
-
-# Install and run
+# Clone test samples service
+git clone https://github.com/ambushalgorithm/prompt-injection-testing.git
+cd prompt-injection-testing
 pip install -r requirements.txt
 python main.py  # Runs on port 8081
 ```
 
-### Running Tests
+### Run Tests
 
 ```bash
-# Build and start service
+# Start scanner service
+cd service && python -m app &
+
+# Run tests
+pytest -v
+```
+
+See [Testing](#testing) section for more details.
+
+## 📁 Project Structure
+
+```
+openclaw-prompt-defender/
+├── plugin/                 # TypeScript plugin (OpenClaw sandbox)
+│   ├── src/
+│   │   └── index.ts       # before_tool_result hook
+│   └── openclaw.plugin.json
+│
+├── service/                # Python scanner service
+│   ├── app.py             # FastAPI /scan endpoint
+│   ├── scanner.py         # Tiered scanning engine
+│   ├── patterns.py        # Detection patterns
+│   └── Dockerfile
+│
+├── docs/
+│   └── DESIGN.md          # Architecture details
+│
+└── README.md
+```
+
+## 🔧 Configuration
+
+```json
+{
+  "features": {
+    "prompt_guard": {
+      "enabled": true,
+      "tier": 2
+    },
+    "ml_detection": {
+      "enabled": false
+    }
+  },
+  "logging": {
+    "enabled": true,
+    "path": "./logs"
+  }
+}
+```
+
+## 🐳 Docker
+
+```bash
+# Build and run
 cd service
-docker build -t prompt-defender:latest .
-docker run -d -p 8080:8080 --name prompt-defender prompt-defender:latest
-
-# Run tests inside container
-docker exec -it prompt-defender pytest tests/
-
-# Check logs
-docker logs -f prompt-defender
+docker build -t prompt-defender .
+docker run -d -p 8080:8080 prompt-defender
 ```
 
-See [TODO.md](TODO.md) for detailed testing checklist.
+Or use docker-compose:
 
----
-
-## Development
-
-### Add New Pattern
-
-1. Edit `service/patterns.py`:
-```python
-CRITICAL_PATTERNS.append(Pattern(
-    pattern=r"your_regex_here",
-    severity="critical",
-    category="your_category",
-    lang="en"
-))
-```
-
-2. Restart service:
 ```bash
-docker restart prompt-defender
+docker-compose up -d
 ```
 
-3. Test:
-```bash
-curl -X POST http://127.0.0.1:8080/scan \
-  -H "Content-Type: application/json" \
-  -d '{"type":"output","tool_name":"test","content":"your test string"}'
-```
+## 🤝 Contributing
 
-### Debug Logs
+Contributions welcome! Check [TODO.md](TODO.md) for current tasks.
 
-Service logs to stdout (Docker):
-```bash
-docker logs -f prompt-defender
-```
+## 📜 License
 
-Plugin logs to OpenClaw's logger:
-```bash
-tail -f ~/.openclaw/logs/*.log
-```
+MIT License
+
+## 🔗 Related Projects
+
+- [prompt-injection-testing](https://github.com/ambushalgorithm/prompt-injection-testing) — Test sample generation
+- [prompt-guard](https://github.com/seojoonkim/prompt-guard) — Regex patterns
+- [detect-injection](https://github.com/protectai/detect-injection) — ML detection
+- [openclaw-shield](https://github.com/knostic/openclaw-shield) — Secrets/PII
 
 ---
 
-## Roadmap
-
-### ✅ Phase 1-2: Infrastructure (Complete)
-- [x] Plugin skeleton (TypeScript)
-- [x] Service skeleton (Python/FastAPI)
-- [x] Docker support
-- [x] Persistent logging (JSONL)
-- [x] `/scan` endpoint
-- [x] Basic pattern detection
-
-### 🔄 Phase 3a: prompt-guard (In Progress)
-- [ ] Port 500+ YAML patterns to Python
-- [ ] Implement tiered scanning engine
-- [ ] Add hash cache (deduplication)
-- [ ] Add Base64/URL decoding
-- [ ] Multi-language support
-- [ ] Owner bypass
-- [ ] End-to-end testing
-
-### ⏸️ Phase 3b: detect-injection
-- [ ] HuggingFace ML model integration
-- [ ] OpenAI content moderation
-- [ ] Dual-layer scanning (patterns + ML)
-
-### ⏸️ Phase 3c: openclaw-shield
-- [ ] Secrets detection (AWS keys, GitHub tokens, etc.)
-- [ ] PII detection (SSN, credit cards, emails)
-- [ ] Sensitive file patterns
-
-### 📋 Phase 4: Polish
-- [ ] Comprehensive test suite
-- [ ] Performance benchmarks
-- [ ] Admin dashboard
-- [ ] Documentation complete
-
----
-
-## Source Projects
-
-| Project | License | Notes |
-|---------|---------|-------|
-| [prompt-guard](https://github.com/seojoonkim/prompt-guard) | MIT | 500+ regex patterns, tiered loading |
-| [detect-injection](https://github.com/protectai/detect-injection) | Apache 2.0 | ML-based detection, content moderation |
-| [openclaw-shield](https://github.com/knostic/openclaw-shield) | Apache 2.0 | Secrets/PII patterns |
-
----
-
-## Related Projects
-
-| Project | Focus | Complementary? |
-|---------|-------|----------------|
-| [Knostic Shield](https://github.com/knostic/openclaw-shield) | Secrets, PII, destructive commands | ✅ Yes - different hooks |
-| openclaw-prompt-defender | Tool output injection prevention | ✅ Use both for defense-in-depth |
-
-**Recommendation:** Use both plugins together - Shield for input/exec protection, Defender for output validation.
-
----
-
-## License
-
-MIT License (matching prompt-guard upstream)
-
----
-
-## Contributing
-
-See [TODO.md](TODO.md) for current task list and implementation priorities.
-
----
-
-**Repository:** https://github.com/ambushalgorithm/openclaw-prompt-defender  
-**Status:** Phase 3a - Implementing prompt-guard patterns  
-**OpenClaw Branch:** Custom build with `before_tool_result` hook (`~/Projects/openclaw-development`)
+<p align="center">
+  <sub>Built with 🔒 for secure AI assistants</sub>
+</p>
