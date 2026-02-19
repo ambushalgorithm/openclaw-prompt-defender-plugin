@@ -121,7 +121,8 @@ class SampleGenerator:
         if params.obfuscated:
             attack_content = self.obfuscator.obfuscate(attack_content)
         
-        attack_html = template.format(attack=attack_content)
+        # Use safe replacement instead of .format() to avoid issues with { }
+        attack_html = template.replace("{attack}", attack_content)
 
         return f"""<!DOCTYPE html>
 <html>
@@ -152,7 +153,7 @@ class SampleGenerator:
         if params.obfuscated:
             attack_content = self.obfuscator.obfuscate(attack_content)
         
-        attack_md = template.format(attack=attack_content)
+        attack_md = template.replace("{attack}", attack_content)
 
         return f"""# Project Documentation
 
@@ -185,11 +186,10 @@ Contact us at support@example.com
         """Generate JSON with embedded secrets/attacks."""
         if params.attack_type == "secret":
             secret = get_random_secret()
+            # secret already includes field name, extract just the value part
             content = {
                 "status": "success",
-                "data": {
-                    "config": secret,
-                },
+                "data": secret,
             }
         elif params.attack_type == "pii":
             pii = get_random_pii()
