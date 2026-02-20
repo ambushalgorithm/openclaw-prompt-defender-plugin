@@ -33,9 +33,11 @@ This plugin works with any scanner service that implements the required API.
 The [prompt-defender-scanner](https://github.com/ambushalgorithm/prompt-defender-scanner) is the recommended scanner:
 
 ```bash
-# Option A: Clone and run directly
+# Clone
 git clone https://github.com/ambushalgorithm/prompt-defender-scanner.git
 cd prompt-defender-scanner
+
+# Option A: Run directly
 pip install -r requirements.txt
 python -m app
 # Scanner runs on http://localhost:8080
