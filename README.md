@@ -1,4 +1,4 @@
-# 🛡️ openclaw-prompt-defender
+# 🛡️ OpenClaw Prompt Defender
 
 <p align="center">
   <img src="https://img.shields.io/badge/Plugin-TypeScript-blue?style=for-the-badge&logo=typescript" alt="TypeScript">
@@ -11,7 +11,7 @@
 
 ## ✨ What is this?
 
-**openclaw-prompt-defender** is a security plugin that protects your AI assistant from malicious inputs hidden in tool outputs. It intercepts results from tools like `web_fetch`, `exec`, and `read` before they reach the LLM, scanning for:
+**OpenClaw Prompt Defender** is a security plugin that protects your AI assistant from malicious inputs hidden in tool outputs. It intercepts results from tools like `web_fetch`, `exec`, and `read` before they reach the LLM, scanning for:
 
 - 🎯 **Prompt injection attacks** — Attempts to override your AI's instructions
 - 🔓 **Jailbreak attempts** — Tricks to bypass safety guidelines  
@@ -25,7 +25,7 @@ This plugin requires the **prompt-defender-scanner** service to work:
 
 | Repo | Description |
 |------|-------------|
-| **openclaw-prompt-defender** | This plugin — drops into OpenClaw |
+| **openclaw-prompt-defender-plugin** | This plugin — drops into OpenClaw |
 | **prompt-defender-scanner** | The scanner service — must be running separately |
 
 ## 🚀 Quick Start
@@ -53,8 +53,12 @@ docker run -d -p 8080:8080 ghcr.io/ambushalgorithm/prompt-defender-scanner
 ### Step 2: Install the Plugin
 
 ```bash
-# Drop the plugin into your OpenClaw plugins directory
-cp -r openclaw-prompt-defender/plugin ~/.openclaw/plugins/prompt-defender
+# Clone this repo
+git clone https://github.com/ambushalgorithm/openclaw-prompt-defender-plugin.git
+cd openclaw-prompt-defender-plugin
+
+# Copy the plugin into your OpenClaw plugins directory
+cp -r plugin ~/.openclaw/plugins/prompt-defender
 ```
 
 ### Step 3: Configure OpenClaw
@@ -133,8 +137,8 @@ curl -X POST "http://localhost:8080/scan" \
 ## 📁 Project Structure
 
 ```
-openclaw-prompt-defender/
-├── plugin/                 # TypeScript plugin (this repo)
+openclaw-prompt-defender-plugin/
+├── plugin/                 # TypeScript plugin
 │   ├── src/
 │   │   └── index.ts       # before_tool_result hook
 │   └── openclaw.plugin.json
