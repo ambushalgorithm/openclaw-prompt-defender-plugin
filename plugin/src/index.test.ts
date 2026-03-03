@@ -4,41 +4,50 @@
 
 import { describe, it, expect } from 'vitest';
 
+interface Config {
+  service_url?: string;
+  timeout_ms?: number;
+  fail_open?: boolean;
+  features?: Record<string, boolean>;
+  scan_tier?: number;
+  [key: string]: unknown;
+}
+
 describe('Prompt Defender Plugin', () => {
   // Test configuration parsing
   describe('Configuration', () => {
     it('should use default service_url when not configured', () => {
-      const config = {};
-      const serviceUrl = (config.service_url as string) || "http://localhost:8080";
+      const config: Config = {};
+      const serviceUrl = config.service_url || "http://localhost:8080";
       expect(serviceUrl).toBe("http://localhost:8080");
     });
 
     it('should use custom service_url when configured', () => {
-      const config = { service_url: "http://custom:9000" };
-      const serviceUrl = (config.service_url as string) || "http://localhost:8080";
+      const config: Config = { service_url: "http://custom:9000" };
+      const serviceUrl = config.service_url || "http://localhost:8080";
       expect(serviceUrl).toBe("http://custom:9000");
     });
 
     it('should use default timeout when not configured', () => {
-      const config = {};
-      const timeoutMs = (config.timeout_ms as number) || 5000;
+      const config: Config = {};
+      const timeoutMs = config.timeout_ms || 5000;
       expect(timeoutMs).toBe(5000);
     });
 
     it('should use custom timeout when configured', () => {
-      const config = { timeout_ms: 10000 };
-      const timeoutMs = (config.timeout_ms as number) || 5000;
+      const config: Config = { timeout_ms: 10000 };
+      const timeoutMs = config.timeout_ms || 5000;
       expect(timeoutMs).toBe(10000);
     });
 
     it('should default fail_open to true', () => {
-      const config = {};
+      const config: Config = {};
       const failOpen = config.fail_open !== false;
       expect(failOpen).toBe(true);
     });
 
     it('should allow setting fail_open to false', () => {
-      const config = { fail_open: false };
+      const config: Config = { fail_open: false };
       const failOpen = config.fail_open !== false;
       expect(failOpen).toBe(false);
     });
@@ -106,15 +115,15 @@ describe('Prompt Defender Plugin', () => {
   // Test feature flags
   describe('Feature Flags', () => {
     it('should enable prompt_guard by default', () => {
-      const config = {};
-      const features = (config.features as Record<string, boolean>) || {};
+      const config: Config = {};
+      const features = config.features || {};
       const promptGuardEnabled = features.prompt_guard !== false;
       expect(promptGuardEnabled).toBe(true);
     });
 
     it('should allow disabling prompt_guard', () => {
-      const config = { features: { prompt_guard: false } };
-      const features = (config.features as Record<string, boolean>) || {};
+      const config: Config = { features: { prompt_guard: false } };
+      const features = config.features || {};
       const promptGuardEnabled = features.prompt_guard !== false;
       expect(promptGuardEnabled).toBe(false);
     });
@@ -127,7 +136,7 @@ describe('Prompt Defender Plugin', () => {
       const features = { prompt_guard: true };
       const scanTier = 1;
 
-      const requestBody = {
+      const requestBody: Config = {
         content,
         features,
         scan_tier: scanTier
@@ -141,7 +150,7 @@ describe('Prompt Defender Plugin', () => {
     it('should handle minimal request', () => {
       const content = "test content";
 
-      const requestBody = {
+      const requestBody: Config = {
         content
       };
 
@@ -154,7 +163,7 @@ describe('Prompt Defender Plugin', () => {
       const content = "test content";
       const features = { prompt_guard: true, ml_detection: false };
 
-      const requestBody = {
+      const requestBody: Config = {
         content,
         features
       };
@@ -166,20 +175,20 @@ describe('Prompt Defender Plugin', () => {
   // Test scan tier
   describe('Scan Tier', () => {
     it('should default to tier 1', () => {
-      const config = {};
-      const scanTier = config.scan_tier !== undefined ? config.scan_tier as number : 1;
+      const config: Config = {};
+      const scanTier = config.scan_tier !== undefined ? config.scan_tier : 1;
       expect(scanTier).toBe(1);
     });
 
     it('should allow custom tier', () => {
-      const config = { scan_tier: 2 };
-      const scanTier = config.scan_tier !== undefined ? config.scan_tier as number : 1;
+      const config: Config = { scan_tier: 2 };
+      const scanTier = config.scan_tier !== undefined ? config.scan_tier : 1;
       expect(scanTier).toBe(2);
     });
 
     it('should allow tier 0', () => {
-      const config = { scan_tier: 0 };
-      const scanTier = config.scan_tier !== undefined ? config.scan_tier as number : 1;
+      const config: Config = { scan_tier: 0 };
+      const scanTier = config.scan_tier !== undefined ? config.scan_tier : 1;
       expect(scanTier).toBe(0);
     });
   });

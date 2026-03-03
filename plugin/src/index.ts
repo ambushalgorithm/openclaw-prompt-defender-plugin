@@ -5,29 +5,20 @@ import type {
   PluginHookToolContext,
 } from "./types/types.d.ts";
 
-interface ScanRequest {
-  content: unknown;
-  features?: Record<string, boolean>;
-  scan_tier?: number;
-}
-
-interface ScanResponse {
-  action: "allow" | "block" | "sanitize";
-  reason?: string;
-  sanitized_content?: unknown;
-  matches?: Array<{
-    pattern: string;
-    severity: string;
-    type: string;
-    lang: string;
-  }>;
+interface SanitizeResponse {
+  original: string;
+  sanitized: string;
+  redacted: boolean;
+  redaction_count: number;
+  redacted_types: string[];
+  was_blocked: boolean;
 }
 
 export default (api: OpenClawPluginApi) => {
   const config = api.pluginConfig || {};
   
   // Service configuration
-  const serviceUrl = (config.service_url as string) || "http://localhost:8080";
+  const serviceUrl = (config.service_url as string) || "http://localhost:8080/scan";
   const timeoutMs = (config.timeout_ms as number) || 5000;
   const failOpen = config.fail_open !== false;
   const scanEnabled = config.scan_enabled !== false;
@@ -62,28 +53,24 @@ export default (api: OpenClawPluginApi) => {
     return excludedTools.includes(toolName);
   };
 
-  // Call the scanning service
-  const scanContent = async (
+  // Call the sanitize service (redacts sensitive data instead of blocking)
+  const sanitizeContent = async (
     content: unknown
-  ): Promise<ScanResponse | null> => {
+  ): Promise<SanitizeResponse | null> => {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-      // Build flattened request body
-      const requestBody: ScanRequest = {
-        content,
-        features,
-        scan_tier: scanTier
-      };
+      // Convert content to string if needed
+      const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
 
-      const response = await fetch(`${serviceUrl}/scan`, {
+      const response = await fetch(`${serviceUrl}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Accept": "application/json",
         },
-        body: JSON.stringify(requestBody),
+        body: contentStr,
         signal: controller.signal,
       });
 
@@ -93,19 +80,23 @@ export default (api: OpenClawPluginApi) => {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      return await response.json() as ScanResponse;
+      return await response.json() as SanitizeResponse;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      api.logger.error(`Scan request failed: ${message}`);
+      api.logger.error(`Sanitize request failed: ${message}`);
       
       if (failOpen) {
-        api.logger.warn(`Fail-open: allowing tool result despite scan failure`);
+        api.logger.warn(`Fail-open: allowing tool result despite sanitize failure`);
         return null;
       }
       
       return {
-        action: "block",
-        reason: `Scan service unavailable: ${message}`,
+        original: String(content),
+        sanitized: String(content),
+        redacted: false,
+        redaction_count: 0,
+        redacted_types: [],
+        was_blocked: true,
       };
     }
   };
@@ -148,37 +139,27 @@ export default (api: OpenClawPluginApi) => {
         return;
       }
 
-      api.logger.info(`[Prompt Defender] Scanning tool result: ${toolName} (callId: ${toolCallId})`);
+      api.logger.info(`[Prompt Defender] Sanitizing tool result: ${toolName} (callId: ${toolCallId})`);
 
-      const result = await scanContent(content);
+      const result = await sanitizeContent(content);
 
       if (!result) {
         // Fail-open: allow through
         return;
       }
 
-      if (result.action === "block") {
-        const matchCount = result.matches?.length || 0;
-        const categories = result.matches?.map(m => m.type).join(", ") || "unknown";
-        
-        api.logger.warn(
-          `[Prompt Defender] BLOCKED ${toolName}: ${matchCount} pattern(s) matched (${categories})`
+      // If content was redacted, return the sanitized version
+      if (result.redacted && result.sanitized !== result.original) {
+        api.logger.info(
+          `[Prompt Defender] REDACTED ${toolName}: ${result.redaction_count} redaction(s) - ${result.redacted_types.join(", ")}`
         );
         
         return {
-          block: true,
-          blockReason: result.reason || "Blocked by Prompt Defender",
+          content: result.sanitized,
         } as PluginHookBeforeToolResultResult;
       }
 
-      if (result.action === "sanitize" && result.sanitized_content !== undefined) {
-        api.logger.info(`[Prompt Defender] SANITIZED ${toolName}`);
-        return {
-          content: result.sanitized_content,
-        } as PluginHookBeforeToolResultResult;
-      }
-
-      // Allow
+      // Allow (no redactions needed)
       api.logger.debug(`[Prompt Defender] ALLOWED ${toolName}`);
       return;
     }

@@ -8,7 +8,7 @@
     "properties": {
       "service_url": {
         "type": "string",
-        "default": "http://localhost:8080",
+        "default": "http://localhost:8080/scan",
         "description": "URL of the security scanning service"
       },
       "timeout_ms": {
